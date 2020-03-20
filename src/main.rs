@@ -134,6 +134,19 @@ fn get_triangle_eq(a: ScreenCoord, b: ScreenCoord, c: ScreenCoord) -> impl Fn(Sc
     move |u| ab_eq(u).min(bc_eq(u)).min(ca_eq(u))
 }
 
+fn get_affine_map(a: ScreenCoord, b: ScreenCoord, c: ScreenCoord, a_v: f64, b_v: f64, c_v: f64) -> impl Fn(ScreenCoord) -> f64 {
+    let ac = ScreenCoord {x: a.x - c.x, y: a.y - c.y };
+    let bc = ScreenCoord {x: b.x - c.x, y: b.y - c.y };
+    let ac_abs = (ac.x * ac.x + ac.y * ac.y).sqrt();
+    let bc_abs = (bc.x * bc.x + bc.y * bc.y).sqrt();
+    let ac_norm = ScreenCoord {x: ac.x / ac_abs, y: ac.y / ac_abs};
+    let bc_norm = ScreenCoord {x: bc.x / bc_abs, y: bc.y / bc_abs};
+    move |u| {
+        let uc = ScreenCoord {x: u.x - c.x, y: u.y - c.y};
+        let uc_ac = 
+    }
+}
+
 fn draw_triangle(
     image: &mut Image,
     a: NormalizedScreenCoord,
