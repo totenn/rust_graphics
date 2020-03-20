@@ -4,8 +4,8 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use std::path::Path;
 
-const WIDTH: usize = 203;
-const HEIGHT: usize = 203;
+const WIDTH: usize = 512;
+const HEIGHT: usize = 256;
 
 struct Image {
     lines: [[[u8; 3]; WIDTH]; HEIGHT],
@@ -23,11 +23,41 @@ struct ScreenCoord {
     y: f64,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct NormalizedScreenCoord {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct NormalizedScreenColor {
+    r: f64,
+    g: f64,
+    b: f64,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct ScreenColor {
+    r: f64,
+    g: f64,
+    b: f64,
+}
+
 fn main() {
     let mut image = Image {
         lines: [[[0, 0, 0]; WIDTH]; HEIGHT],
     };
-    draw_triangle(ScreenCoord { x: 0.0, y: -0.5 }, ScreenCoord { x: 0.5, y: 0.0 }, ScreenCoord { x: -0.5, y: 0.5 }, &mut image);
+    draw_triangle(
+        &mut image,
+        NormalizedScreenCoord { x: 0.0, y: -0.5 },
+        NormalizedScreenCoord { x: 0.5, y: 0.0 },
+        NormalizedScreenCoord { x: -0.5, y: 0.5 },
+        NormalizedScreenColor {
+            r: 1.0,
+            b: 1.0,
+            g: 1.0,
+        },
+    );
     write_ppm(&image, "output");
 }
 
@@ -62,112 +92,71 @@ fn write_ppm(image: &Image, filename: &str) {
     };
 }
 
-fn screen_to_image_coord(screen_coord: ScreenCoord) -> ImageCoord {
-    ImageCoord {
-        x: ((screen_coord.x + 1.0) * (WIDTH - 1) as f64 / 2.0) as usize,
-        y: ((screen_coord.y + 1.0) * (HEIGHT - 1) as f64 / 2.0) as usize,
-    }
-}
-
 fn image_to_screen_coord(image_coord: ImageCoord) -> ScreenCoord {
     ScreenCoord {
-        x: image_coord.x as f64 * 2.0 / (WIDTH - 1) as f64 - 1.0,
-        y: image_coord.y as f64 * 2.0 / (HEIGHT - 1) as f64 - 1.0,
+        x: image_coord.x as f64,
+        y: image_coord.y as f64,
     }
-}
-
-fn draw_point(screen_coord: ScreenCoord, image: &mut Image) {
-    let image_coord = screen_to_image_coord(screen_coord);
-    image.lines[image_coord.y][image_coord.x] = [255, 255, 255];
 }
 
 fn get_line_eq(a: ScreenCoord, b: ScreenCoord) -> impl Fn(ScreenCoord) -> f64 {
-    let t = ScreenCoord {
+    let t = NormalizedScreenCoord {
         x: b.x - a.x,
         y: b.y - a.y,
     };
-    let t_norm = (t.x*t.x + t.y*t.y).sqrt();
-    let n = ScreenCoord { x: -t.y/t_norm , y: t.x/t_norm };
+    let t_norm = (t.x * t.x + t.y * t.y).sqrt();
+    let n = NormalizedScreenCoord {
+        x: -t.y / t_norm,
+        y: t.x / t_norm,
+    };
     move |u| (u.x - a.x) * n.x + (u.y - a.y) * n.y
 }
 
-fn draw_half_space(a: ScreenCoord, b: ScreenCoord, image: &mut Image) {
-    let pixel_width = 1.0 / ((HEIGHT * HEIGHT + WIDTH * WIDTH) as f64).sqrt();
-    let line_eq = get_line_eq(a, b);
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
-            let screen_coord = image_to_screen_coord(ImageCoord { x, y });
-            let line_sign = line_eq(screen_coord);
-            if line_sign < 0.0 - pixel_width {
-                image.lines[y][x] = [255, 255, 255];
-            } else if line_sign < 0.0 + pixel_width {
-                let intensity = 128 + (line_sign * 128.0) as u8;
-                image.lines[y][x] = [intensity, intensity, intensity];
-            }
-        }
+fn denormalize_screen_coord(normalized_coord: NormalizedScreenCoord) -> ScreenCoord {
+    ScreenCoord {
+        x: ((normalized_coord.x + 1.0) * (WIDTH - 1) as f64 / 2.0),
+        y: ((normalized_coord.y + 1.0) * (HEIGHT - 1) as f64 / 2.0),
     }
 }
 
-fn draw_triangle(a: ScreenCoord, b: ScreenCoord, c: ScreenCoord, image: &mut Image) {
-    let pixel_width = 1.0 / ((HEIGHT * HEIGHT + WIDTH * WIDTH) as f64).sqrt();
+fn denormalize_screen_color(normalized_color: NormalizedScreenColor) -> ScreenColor {
+    ScreenColor {
+        r: normalized_color.r * 255.0,
+        g: normalized_color.g * 255.0,
+        b: normalized_color.b * 255.0,
+    }
+}
+
+fn get_triangle_eq(a: ScreenCoord, b: ScreenCoord, c: ScreenCoord) -> impl Fn(ScreenCoord) -> f64 {
     let ab_eq = get_line_eq(a, b);
     let bc_eq = get_line_eq(b, c);
     let ca_eq = get_line_eq(c, a);
+    move |u| ab_eq(u).min(bc_eq(u)).min(ca_eq(u))
+}
+
+fn draw_triangle(
+    image: &mut Image,
+    a: NormalizedScreenCoord,
+    b: NormalizedScreenCoord,
+    c: NormalizedScreenCoord,
+    color: NormalizedScreenColor,
+) {
+    let a_denorm = denormalize_screen_coord(a);
+    let b_denorm = denormalize_screen_coord(b);
+    let c_denorm = denormalize_screen_coord(c);
+    let color_denorm = denormalize_screen_color(color);
+    let triangle_eq = get_triangle_eq(a_denorm, b_denorm, c_denorm);
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
             let screen_coord = image_to_screen_coord(ImageCoord { x, y });
-            let ab_sign = ab_eq(screen_coord);
-            let bc_sign = bc_eq(screen_coord);
-            let ca_sign = ca_eq(screen_coord);
-            let triangle_sign = ab_sign.min(bc_sign).min(ca_sign);
-            if triangle_sign < -pixel_width {
-                image.lines[y][x] = [255, 255, 255];
-            } else if triangle_sign < 0.0 + pixel_width {
-                let intensity = 128 + (triangle_sign * 128.0) as u8;
-                image.lines[y][x] = [intensity, intensity, intensity];
+            let intensity = (triangle_eq(screen_coord) + 0.5).max(0.0).min(1.0);
+            if intensity > 0.0 {
+                image.lines[y][x] = [
+                    (intensity * color_denorm.r) as u8,
+                    (intensity * color_denorm.g) as u8,
+                    (intensity * color_denorm.b) as u8,
+                ];
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_screen_to_image_coord() {
-        assert_eq!(
-            screen_to_image_coord(ScreenCoord { x: 1.0, y: 1.0 }),
-            ImageCoord {
-                x: WIDTH - 1,
-                y: HEIGHT - 1
-            }
-        );
-        assert_eq!(
-            screen_to_image_coord(ScreenCoord { x: -1.0, y: -1.0 }),
-            ImageCoord { x: 0, y: 0 }
-        );
-        assert_eq!(
-            screen_to_image_coord(ScreenCoord { x: 0.0, y: 0.0 }),
-            ImageCoord {
-                x: (WIDTH - 1) / 2,
-                y: (HEIGHT - 1) / 2
-            }
-        );
-    }
-
-    #[test]
-    fn test_image_to_screen_coord() {
-        assert_eq!(
-            image_to_screen_coord(ImageCoord {
-                x: WIDTH - 1,
-                y: HEIGHT - 1
-            }),
-            ScreenCoord { x: 1.0, y: 1.0 }
-        );
-        assert_eq!(
-            image_to_screen_coord(ImageCoord { x: 0, y: 0 }),
-            ScreenCoord { x: -1.0, y: -1.0 }
-        );
     }
 }
